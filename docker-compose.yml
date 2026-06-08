@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: recruit-ai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: recruit
+      POSTGRES_PASSWORD: recruit_dev
+      POSTGRES_DB: recruit_ai
+    ports:
+      - '5432:5432'
+    volumes:
+      - recruit_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U recruit -d recruit_ai']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  recruit_pg_data:

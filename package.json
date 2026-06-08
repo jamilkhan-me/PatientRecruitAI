@@ -1,0 +1,34 @@
+{
+  "name": "recruit-ai",
+  "version": "1.0.0",
+  "description": "AI-Driven Patient Recruitment Intelligence Platform",
+  "private": true,
+  "workspaces": [
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "npm run dev --workspace=@recruit-ai/api",
+    "dev:all": "concurrently -n web,api -c blue,green \"npm run dev\" \"npm run dev:api\"",
+    "build": "tsc && vite build",
+    "build:api": "npm run build --workspace=@recruit-ai/api",
+    "preview": "vite preview",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:setup": "npm run db:up && sleep 3 && npm run db:migrate && npm run db:seed",
+    "db:migrate": "npm run prisma:migrate --workspace=@recruit-ai/api",
+    "db:seed": "npm run prisma:seed --workspace=@recruit-ai/api"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.2"
+  }
+}

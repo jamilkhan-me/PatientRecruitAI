@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  researcher
+  recruiter
+}
+
+enum RecruitStage {
+  Identified
+  Eligible
+  Contacted
+  Interested
+  Consented
+}
+
+enum RiskLevel {
+  low
+  medium
+  high
+}
+
+enum TrialRecruitmentStatus {
+  Planned
+  Enrolling
+  Recruiting
+  Paused
+  Completed
+  Archived
+}
+
+model User {
+  id                 String               @id @default(cuid())
+  email              String               @unique
+  passwordHash       String
+  name               String
+  role               Role                 @default(recruiter)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  ownedTrials        Trial[]              @relation("TrialOwner")
+  passwordResetTokens PasswordResetToken[]
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Trial {
+  id                        String                 @id @default(cuid())
+  title                     String
+  protocolId                String
+  sponsor                   String
+  phase                     String
+  therapeuticArea           String
+  condition                 String
+  description               String
+  recruitmentTarget         Int
+  enrollmentGoal            Int
+  enrollmentTarget          Int                    @default(0)
+  recruitmentStatus         TrialRecruitmentStatus
+  ageMin                    Int
+  ageMax                    Int
+  targetConditions          String[]
+  sites                     Json
+  startDate                 DateTime               @db.Date
+  endDate                   DateTime               @db.Date
+  ownerId                   String
+  owner                     User                   @relation("TrialOwner", fields: [ownerId], references: [id])
+  recruiterIds              String[]
+  archived                  Boolean                @default(false)
+  protocolCriteria          Json?
+  protocolCriteriaUpdatedAt DateTime?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+  patients                  Patient[]
+
+  @@index([ownerId])
+  @@index([archived])
+}
+
+model Patient {
+  id               String       @id @default(cuid())
+  externalId       String?
+  trialId          String
+  trial            Trial        @relation(fields: [trialId], references: [id], onDelete: Cascade)
+  name             String
+  age              Int
+  gender           String
+  diagnosis        String
+  condition        String
+  stage            RecruitStage @default(Identified)
+  eligibilityScore Int          @default(0)
+  aiConfidence     Int          @default(0)
+  riskLevel        RiskLevel    @default(low)
+  reasons          Json         @default("[]")
+  riskFlags        Json         @default("[]")
+  history          Json         @default("[]")
+  medications      Json         @default("[]")
+  labResults       Json         @default("[]")
+  outreach         Json         @default("[]")
+  notes            String[]     @default([])
+  activityLog      Json         @default("[]")
+  flagged          Boolean      @default(false)
+  lastContact      DateTime?    @db.Date
+  tags             String[]     @default([])
+  uploadedAt       DateTime     @default(now())
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([trialId])
+  @@index([stage])
+}
