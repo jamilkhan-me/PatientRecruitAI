@@ -2378,6 +2378,387 @@ function ProtocolDocumentCenterView({
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// TRIAL WORKSPACE — Phase 3 components
+// ═══════════════════════════════════════════════════════════════════
+type TrialTab = 'overview' | 'pipeline' | 'team' | 'settings'
+
+function StageDistributionBar({ patients }: { patients: Patient[] }) {
+  const total = patients.length
+  if (total === 0) return <p style={{ fontSize: 13, color: C.slate, margin: 0 }}>No patients in this trial yet.</p>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      {STAGES.map((stage) => {
+        const count = patients.filter((p) => p.stage === stage).length
+        const pct = Math.round((count / total) * 100)
+        const m = STAGE_META[stage]
+        return (
+          <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 82, fontSize: 11, fontWeight: 600, color: m.color, flexShrink: 0 }}>{m.icon} {stage}</span>
+            <div style={{ flex: 1, height: 8, borderRadius: 4, background: '#E2E8F0', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${pct}%`, background: m.color, borderRadius: 4, transition: 'width 0.6s ease' }} />
+            </div>
+            <span style={{ width: 24, fontSize: 11, fontWeight: 700, color: C.muted, textAlign: 'right' }}>{count}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RecruitmentProgressRing({ enrolled, goal, size = 80 }: { enrolled: number; goal: number; size?: number }) {
+  const pct = goal > 0 ? Math.min(100, Math.round((enrolled / goal) * 100)) : 0
+  const r = (size - 10) / 2
+  const circ = 2 * Math.PI * r
+  const fill = circ * (1 - pct / 100)
+  const color = pct >= 80 ? '#047857' : pct >= 50 ? C.blue : '#B45309'
+  return (
+    <svg width={size} height={size} style={{ flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={C.border} strokeWidth={8} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={8}
+        strokeDasharray={circ} strokeDashoffset={fill} strokeLinecap="round"
+        style={{ transform: 'rotate(-90deg)', transformOrigin: '50% 50%', transition: 'stroke-dashoffset 0.8s ease' }} />
+      <text x="50%" y="42%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.22} fontWeight={800} fill={color}>{pct}%</text>
+      <text x="50%" y="65%" dominantBaseline="central" textAnchor="middle" fontSize={size * 0.12} fill={C.muted}>enrolled</text>
+    </svg>
+  )
+}
+
+function TrialMetricTile({ label, value, sub, color = C.blue }: { label: string; value: string | number; sub?: string; color?: string }) {
+  return (
+    <div style={{ borderRadius: 12, border: `1px solid ${C.border}`, padding: '12px 14px', background: C.white, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>{label}</span>
+      <span style={{ fontSize: 22, fontWeight: 800, color }}>{value}</span>
+      {sub && <span style={{ fontSize: 11, color: C.slate }}>{sub}</span>}
+    </div>
+  )
+}
+
+function TrialWorkspacePanel({
+  trial, patients, users, session, activeTrialId,
+  onSetActive, onSaveTrial, onArchiveTrial, setPage, docCount,
+  stageChange, setDetailPatient, addOutreach,
+}: {
+  trial: Trial; patients: Patient[]; users: DemoUser[]; session: DemoUser
+  activeTrialId: string; onSetActive: (id: string) => void; onSaveTrial: (t: Trial) => void
+  onArchiveTrial: (id: string) => void; setPage: (p: Page) => void; docCount: number
+  stageChange: (pid: string, stage: RecruitStage) => void
+  setDetailPatient: (p: Patient) => void
+  addOutreach: (pid: string, rec: OutreachRecord) => void
+}) {
+  const [tab, setTab] = useState<TrialTab>('overview')
+  const [showEdit, setShowEdit] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [settingsForm, setSettingsForm] = useState<Pick<Trial, 'recruitmentStatus' | 'recruitmentTarget' | 'enrollmentGoal' | 'startDate' | 'endDate' | 'description'>>({
+    recruitmentStatus: trial.recruitmentStatus,
+    recruitmentTarget: trial.recruitmentTarget,
+    enrollmentGoal: trial.enrollmentGoal,
+    startDate: trial.startDate,
+    endDate: trial.endDate,
+    description: trial.description,
+  })
+
+  useEffect(() => {
+    setSettingsForm({
+      recruitmentStatus: trial.recruitmentStatus,
+      recruitmentTarget: trial.recruitmentTarget,
+      enrollmentGoal: trial.enrollmentGoal,
+      startDate: trial.startDate,
+      endDate: trial.endDate,
+      description: trial.description,
+    })
+  }, [trial.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isActive = trial.id === activeTrialId
+  const trialPatients = patients.filter((p) => p.trialId === trial.id)
+  const consented = trialPatients.filter((p) => p.stage === 'Consented').length
+  const daysLeft = daysUntil(trial.endDate)
+  const owner = users.find((u) => u.id === trial.ownerId)
+  const recruiters = users.filter((u) => trial.recruiterIds.includes(u.id))
+  const unassigned = users.filter((u) => u.id !== trial.ownerId && !trial.recruiterIds.includes(u.id))
+
+  const inp: CSSProperties = { width: '100%', borderRadius: 10, border: `1.5px solid ${C.border}`, padding: '8px 10px', fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box' }
+  const lbl: CSSProperties = { display: 'block', marginBottom: 5, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }
+
+  const TABS: { id: TrialTab; label: string; icon: string }[] = [
+    { id: 'overview', label: 'Overview', icon: '⊞' },
+    { id: 'pipeline', label: 'Pipeline', icon: '🔄' },
+    { id: 'team', label: 'Team', icon: '👥' },
+    { id: 'settings', label: 'Settings', icon: '⚙️' },
+  ]
+
+  const saveSettings = () => {
+    onSaveTrial(syncTrialEnrollment({
+      ...trial,
+      ...settingsForm,
+      enrollmentTarget: settingsForm.enrollmentGoal,
+      updatedAt: TODAY,
+    }))
+  }
+
+  return (
+    <Card style={{ display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 120px)', overflow: 'hidden', position: 'sticky', top: 0 }}>
+      {showEdit && (
+        <TrialFormModal trial={trial} users={users} onClose={() => setShowEdit(false)}
+          onSave={(t) => { onSaveTrial(t); setShowEdit(false) }} />
+      )}
+
+      {/* Panel header */}
+      <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <div style={{ ...flexBetween, marginBottom: 8 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5 }}>{trial.protocolId} · {trial.phase}</p>
+            <p style={{ margin: '2px 0 0', fontSize: 15, fontWeight: 800, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{trial.title}</p>
+          </div>
+          <div style={{ ...flex, gap: 5, flexShrink: 0, marginLeft: 10, alignItems: 'center' }}>
+            <TrialStatusBadge status={trial.archived ? 'Archived' : trial.recruitmentStatus} />
+            {isActive && <span style={{ borderRadius: 999, background: C.blue, color: '#fff', padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>Active</span>}
+          </div>
+        </div>
+        <div style={{ ...flex, gap: 6, flexWrap: 'wrap' }}>
+          {!trial.archived && !isActive && <Button variant="sm" onClick={() => onSetActive(trial.id)}>Use this trial</Button>}
+          {canManageTrials(session.role) && !trial.archived && <Button variant="sm" onClick={() => setShowEdit(true)}>✏️ Edit</Button>}
+          <Button variant="sm" onClick={() => { onSetActive(trial.id); setPage('dashboard') }}>Dashboard →</Button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${C.border}`, background: '#FAFBFF', flexShrink: 0 }}>
+        {TABS.map((t) => (
+          <button key={t.id} type="button" onClick={() => setTab(t.id)}
+            style={{ flex: 1, padding: '9px 4px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: tab === t.id ? C.blue : C.muted, borderBottom: `2px solid ${tab === t.id ? C.blue : 'transparent'}`, transition: 'all 0.15s', fontFamily: 'inherit' }}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab body */}
+      <div className="scrollbar-thin" style={{ flex: 1, overflowY: 'auto', padding: tab === 'pipeline' ? 0 : 16 }}>
+
+        {/* ── OVERVIEW ── */}
+        {tab === 'overview' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <TrialMetricTile label="Total patients" value={trialPatients.length} sub={`of ${trial.recruitmentTarget} target`} />
+              <TrialMetricTile label="Consented" value={consented} sub={`of ${trial.enrollmentGoal} goal`} color="#047857" />
+              <TrialMetricTile label="Days remaining" value={daysLeft > 0 ? daysLeft : 'Ended'} sub={trial.endDate}
+                color={daysLeft < 0 ? '#64748B' : daysLeft < 30 ? '#B91C1C' : daysLeft < 90 ? '#B45309' : C.blue} />
+              <TrialMetricTile label="Team" value={recruiters.length + (owner ? 1 : 0)} sub={`${docCount} doc${docCount !== 1 ? 's' : ''} on file`} color={C.purple} />
+            </div>
+
+            <div style={{ borderRadius: 12, border: `1px solid ${C.border}`, padding: 14, background: C.white }}>
+              <div style={{ ...flex, alignItems: 'center', gap: 14, marginBottom: 12 }}>
+                <RecruitmentProgressRing enrolled={consented} goal={trial.enrollmentGoal} size={80} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 700, color: C.text }}>Enrollment progress</p>
+                  <p style={{ margin: '0 0 6px', fontSize: 11, color: C.muted }}>{consented} consented · {trial.enrollmentGoal} goal</p>
+                  <ProgressBar value={consented} max={trial.enrollmentGoal} color="#047857" />
+                  <p style={{ margin: '10px 0 4px', fontSize: 11, color: C.muted }}>Recruitment pipeline</p>
+                  <ProgressBar value={trialPatients.length} max={trial.recruitmentTarget} color={C.blue} />
+                  <p style={{ margin: '4px 0 0', fontSize: 10, color: C.slate }}>{trialPatients.length} in pipeline · {trial.recruitmentTarget} target</p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Recruitment funnel</p>
+              <StageDistributionBar patients={trialPatients} />
+            </div>
+
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Trial details</p>
+              {([
+                ['Sponsor', trial.sponsor || '—'],
+                ['Therapeutic area', trial.therapeuticArea || '—'],
+                ['Condition', trial.condition],
+                ['Age range', `${trial.ageRange.min}–${trial.ageRange.max} years`],
+                ['Sites', trial.sites.length ? `${trial.sites.length} site${trial.sites.length !== 1 ? 's' : ''}` : 'None configured'],
+                ['Protocol criteria', trial.protocolCriteria ? '✓ Synced from protocol doc' : 'Upload protocol PDF to enable AI'],
+              ] as [string, string][]).map(([k, v]) => (
+                <div key={k} style={{ ...flexBetween, padding: '7px 0', borderBottom: `1px solid #F8FAFC`, fontSize: 12 }}>
+                  <span style={{ fontWeight: 600, color: C.muted }}>{k}</span>
+                  <span style={{ textAlign: 'right', maxWidth: '58%', color: C.text }}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              <Button variant="secondary" onClick={() => { onSetActive(trial.id); setPage('documents') }}>📁 Documents</Button>
+              <Button variant="secondary" onClick={() => { onSetActive(trial.id); setPage('patients') }}>👥 Patients ({trialPatients.length})</Button>
+              <Button variant="secondary" onClick={() => { onSetActive(trial.id); setPage('analytics') }}>📊 Analytics</Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── PIPELINE ── */}
+        {tab === 'pipeline' && (
+          trialPatients.length === 0 ? (
+            <div style={{ padding: 16 }}>
+              <EmptyState icon="🔄" title="No patients in pipeline" description="Add patients to start managing the recruitment pipeline." />
+              <div style={{ ...flexCenter, marginTop: 12, gap: 8 }}>
+                <Button variant="secondary" onClick={() => { onSetActive(trial.id); setPage('patients') }}>Add patients</Button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ height: 520 }}>
+              <KanbanView patients={trialPatients} role={session.role} stageChange={stageChange}
+                setDetailPatient={setDetailPatient} addOutreach={addOutreach} />
+            </div>
+          )
+        )}
+
+        {/* ── TEAM ── */}
+        {tab === 'team' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Trial owner</p>
+              {owner ? (
+                <div style={{ ...flex, gap: 12, alignItems: 'center', borderRadius: 12, border: `1px solid ${C.border}`, padding: '12px 14px', background: C.white }}>
+                  <Avatar name={owner.name} size={40} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.text }}>{owner.name}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: C.muted }}>{owner.email}</p>
+                  </div>
+                  <span style={{ borderRadius: 8, padding: '2px 10px', fontSize: 11, fontWeight: 700, color: ROLE_META[owner.role].color, background: ROLE_META[owner.role].bg, flexShrink: 0 }}>
+                    {ROLE_META[owner.role].label}
+                  </span>
+                </div>
+              ) : (
+                <p style={{ fontSize: 13, color: C.slate }}>No owner assigned.</p>
+              )}
+            </div>
+
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Assigned recruiters ({recruiters.length})</p>
+              {recruiters.length === 0 ? (
+                <p style={{ fontSize: 13, color: C.slate }}>No recruiters assigned. Edit the trial to assign recruiters.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {recruiters.map((r) => (
+                    <div key={r.id} style={{ ...flex, gap: 12, alignItems: 'center', borderRadius: 12, border: `1px solid ${C.border}`, padding: '10px 14px', background: C.white }}>
+                      <Avatar name={r.name} size={36} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: C.text }}>{r.name}</p>
+                        <p style={{ margin: '2px 0 0', fontSize: 11, color: C.muted }}>{r.email}</p>
+                      </div>
+                      <span style={{ borderRadius: 8, padding: '2px 10px', fontSize: 11, fontWeight: 700, color: ROLE_META[r.role].color, background: ROLE_META[r.role].bg, flexShrink: 0 }}>
+                        {ROLE_META[r.role].label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {unassigned.length > 0 && (
+              <div>
+                <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Other org members</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {unassigned.map((u) => (
+                    <div key={u.id} style={{ ...flex, gap: 10, alignItems: 'center', borderRadius: 10, padding: '8px 12px', background: '#F8FAFC', border: `1px solid ${C.border}` }}>
+                      <Avatar name={u.name} size={28} />
+                      <span style={{ fontSize: 12, color: C.muted, flex: 1 }}>{u.name}</span>
+                      <span style={{ borderRadius: 8, padding: '2px 8px', fontSize: 10, fontWeight: 700, color: ROLE_META[u.role].color, background: ROLE_META[u.role].bg }}>
+                        {ROLE_META[u.role].label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {canManageTrials(session.role) && (
+              <Button variant="secondary" onClick={() => setShowEdit(true)}>✏️ Manage team assignments</Button>
+            )}
+          </div>
+        )}
+
+        {/* ── SETTINGS ── */}
+        {tab === 'settings' && (
+          canManageTrials(session.role) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <p style={{ margin: '0 0 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Recruitment settings</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div>
+                    <label style={lbl}>Recruitment status</label>
+                    <select style={inp} value={settingsForm.recruitmentStatus}
+                      onChange={(e) => setSettingsForm((f) => ({ ...f, recruitmentStatus: e.target.value as TrialRecruitmentStatus }))}>
+                      {(Object.keys(TRIAL_STATUS_META) as TrialRecruitmentStatus[]).filter((s) => s !== 'Archived').map((s) => (
+                        <option key={s} value={s}>{TRIAL_STATUS_META[s].label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={lbl}>Recruitment target</label>
+                      <input type="number" style={inp} value={settingsForm.recruitmentTarget}
+                        onChange={(e) => setSettingsForm((f) => ({ ...f, recruitmentTarget: Number(e.target.value) }))} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Enrollment goal</label>
+                      <input type="number" style={inp} value={settingsForm.enrollmentGoal}
+                        onChange={(e) => setSettingsForm((f) => ({ ...f, enrollmentGoal: Number(e.target.value) }))} />
+                    </div>
+                    <div>
+                      <label style={lbl}>Start date</label>
+                      <input type="date" style={inp} value={settingsForm.startDate}
+                        onChange={(e) => setSettingsForm((f) => ({ ...f, startDate: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label style={lbl}>End date</label>
+                      <input type="date" style={inp} value={settingsForm.endDate}
+                        onChange={(e) => setSettingsForm((f) => ({ ...f, endDate: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={lbl}>Trial description</label>
+                    <textarea style={{ ...inp, minHeight: 72, resize: 'vertical' }} value={settingsForm.description}
+                      onChange={(e) => setSettingsForm((f) => ({ ...f, description: e.target.value }))} />
+                  </div>
+                  <Button onClick={saveSettings}>Save settings</Button>
+                </div>
+              </div>
+
+              <div>
+                <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: C.muted, letterSpacing: 0.5 }}>Trial sites ({trial.sites.length})</p>
+                {trial.sites.length === 0 ? (
+                  <p style={{ fontSize: 12, color: C.slate, marginBottom: 8 }}>No sites configured.</p>
+                ) : (
+                  trial.sites.map((s) => (
+                    <div key={s.id} style={{ borderRadius: 10, background: '#F8FAFC', border: `1px solid ${C.border}`, padding: '10px 12px', marginBottom: 8 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: C.text }}>{s.name}</p>
+                      <p style={{ margin: '2px 0 0', color: C.muted, fontSize: 12 }}>{s.city}, {s.country}</p>
+                    </div>
+                  ))
+                )}
+                <Button variant="secondary" onClick={() => setShowEdit(true)}>Edit sites & metadata</Button>
+              </div>
+
+              {!trial.archived && (
+                <div style={{ borderRadius: 12, border: '1px solid #FECACA', background: '#FEF2F2', padding: 14 }}>
+                  <p style={{ margin: '0 0 4px', fontSize: 11, fontWeight: 700, color: '#B91C1C', textTransform: 'uppercase', letterSpacing: 0.5 }}>Danger zone</p>
+                  <p style={{ margin: '0 0 10px', fontSize: 12, color: '#7F1D1D' }}>Archiving removes this trial from active recruitment. All data is preserved.</p>
+                  {confirmArchive ? (
+                    <div style={{ ...flex, gap: 8 }}>
+                      <Button variant="danger" onClick={() => { onArchiveTrial(trial.id); setConfirmArchive(false) }}>Confirm archive</Button>
+                      <Button variant="ghost" onClick={() => setConfirmArchive(false)}>Cancel</Button>
+                    </div>
+                  ) : (
+                    <Button variant="danger" onClick={() => setConfirmArchive(true)}>Archive trial</Button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <EmptyState icon="🔒" title="Admin only" description="Trial settings can only be modified by administrators." />
+          )
+        )}
+      </div>
+    </Card>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // TRIALS MODULE
 // ═══════════════════════════════════════════════════════════════════
 function sitesToText(sites: TrialSite[]): string {
@@ -2548,7 +2929,7 @@ function TrialFormModal({ trial, onClose, onSave, users }: {
   )
 }
 
-function TrialsView({ trials, patients, activeTrialId, session, onSetActive, onSaveTrial, onArchiveTrial, setPage, docCountByTrial, users }: {
+function TrialsView({ trials, patients, activeTrialId, session, onSetActive, onSaveTrial, onArchiveTrial, setPage, docCountByTrial, users, stageChange, setDetailPatient, addOutreach }: {
   trials: Trial[]
   patients: Patient[]
   activeTrialId: string
@@ -2559,6 +2940,9 @@ function TrialsView({ trials, patients, activeTrialId, session, onSetActive, onS
   setPage: (p: Page) => void
   docCountByTrial: (trialId: string) => number
   users: DemoUser[]
+  stageChange: (pid: string, stage: RecruitStage) => void
+  setDetailPatient: (p: Patient) => void
+  addOutreach: (pid: string, rec: OutreachRecord) => void
 }) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Trial | null>(null)
@@ -2682,67 +3066,23 @@ function TrialsView({ trials, patients, activeTrialId, session, onSetActive, onS
 
         <div>
           {detail ? (
-            <Card style={{ position: 'sticky', top: 0 }}>
-              <CardHeader style={flexBetween}>
-                <span style={{ fontWeight: 700 }}>Trial setup</span>
-                <TrialStatusBadge status={detail.archived ? 'Archived' : detail.recruitmentStatus} />
-              </CardHeader>
-              <CardBody>
-                <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.6, color: C.muted }}>{detail.description || 'No description provided.'}</p>
-                {[
-                  ['Protocol ID', detail.protocolId],
-                  ['Sponsor', detail.sponsor],
-                  ['Therapeutic area', detail.therapeuticArea],
-                  ['Disease / condition', detail.condition],
-                  ['Recruitment target', String(detail.recruitmentTarget)],
-                  ['Enrollment goal', String(detail.enrollmentGoal)],
-                  ['Eligible ages', `${detail.ageRange.min}–${detail.ageRange.max}`],
-                  ['Start date', detail.startDate],
-                  ['End date', detail.endDate],
-                  ['Trial owner', userName(detail.ownerId)],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ ...flexBetween, padding: '8px 0', borderBottom: '1px solid #F8FAFC', fontSize: 13 }}>
-                    <span style={{ fontWeight: 600, color: C.muted }}>{k}</span>
-                    <span style={{ textAlign: 'right', maxWidth: '60%' }}>{v}</span>
-                  </div>
-                ))}
-                <p style={{ margin: '16px 0 8px', fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase' }}>Recruiter assignments</p>
-                {detail.recruiterIds.length === 0 ? (
-                  <p style={{ margin: 0, fontSize: 13, color: C.slate }}>No recruiters assigned</p>
-                ) : (
-                  detail.recruiterIds.map((rid) => (
-                    <div key={rid} style={{ ...flex, gap: 8, marginBottom: 6, fontSize: 13 }}>
-                      <Avatar name={userName(rid)} size={24} />
-                      <span>{userName(rid)}</span>
-                    </div>
-                  ))
-                )}
-                <p style={{ margin: '16px 0 8px', fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase' }}>Trial sites ({detail.sites.length})</p>
-                {detail.sites.map((s) => (
-                  <div key={s.id} style={{ borderRadius: 10, background: '#F8FAFC', padding: '10px 12px', marginBottom: 8, fontSize: 13 }}>
-                    <strong>{s.name}</strong>
-                    <p style={{ margin: '2px 0 0', color: C.muted }}>{s.city}, {s.country}</p>
-                  </div>
-                ))}
-                <p style={{ margin: '16px 0 8px', fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase' }}>Protocol & reference documents</p>
-                <p style={{ margin: '0 0 10px', fontSize: 13, color: C.muted }}>
-                  {docCountByTrial(detail.id)} document{docCountByTrial(detail.id) !== 1 ? 's' : ''} on file
-                  {detail.protocolCriteria ? ' · AI criteria synced' : ' · Upload protocol PDF to enable AI parsing'}
-                </p>
-                <p style={{ margin: '16px 0 8px', fontSize: 12, fontWeight: 700, color: C.muted, textTransform: 'uppercase' }}>Linked recruitment</p>
-                <div style={{ ...flex, gap: 8, flexWrap: 'wrap' }}>
-                  {detail.id !== activeTrialId && !detail.archived && (
-                    <Button onClick={() => activateTrial(detail.id)}>Use this trial</Button>
-                  )}
-                  <Button variant="secondary" onClick={() => { activateTrial(detail.id); setPage('documents') }}>📁 Document center</Button>
-                  <Button variant="secondary" onClick={() => { activateTrial(detail.id); setPage('patients') }}>View patients ({patientCount(detail.id)})</Button>
-                  <Button variant="secondary" onClick={() => { activateTrial(detail.id); setPage('pipeline') }}>Pipeline</Button>
-                  <Button variant="secondary" onClick={() => { activateTrial(detail.id); setPage('analytics') }}>Analytics</Button>
-                </div>
-              </CardBody>
-            </Card>
+            <TrialWorkspacePanel
+              trial={detail}
+              patients={patients}
+              users={users}
+              session={session}
+              activeTrialId={activeTrialId}
+              onSetActive={(id) => { onSetActive(id); setSelectedTrialId(id) }}
+              onSaveTrial={onSaveTrial}
+              onArchiveTrial={onArchiveTrial}
+              setPage={setPage}
+              docCount={docCountByTrial(detail.id)}
+              stageChange={stageChange}
+              setDetailPatient={setDetailPatient}
+              addOutreach={addOutreach}
+            />
           ) : (
-            <Card><EmptyState title="Select a trial" description="Choose a trial from the list to view full setup details." /></Card>
+            <Card><EmptyState title="Select a trial" description="Choose a trial from the list to view its workspace." /></Card>
           )}
         </div>
       </div>
@@ -4327,7 +4667,8 @@ export default function App() {
           {page === 'trials' && (
             <TrialsView trials={trials} patients={patients} activeTrialId={activeTrialId} session={session}
               onSetActive={handleSetActiveTrial} onSaveTrial={saveTrial} onArchiveTrial={archiveTrial} setPage={setPage}
-              docCountByTrial={docCountForTrial} users={orgUsers} />
+              docCountByTrial={docCountForTrial} users={orgUsers}
+              stageChange={stageChange} setDetailPatient={setDetailPatient} addOutreach={addOutreach} />
           )}
           {page === 'documents' && (
             <ProtocolDocumentCenterView
